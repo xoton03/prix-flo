@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Prix Flo</string>
+	<string>TagUp</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>flo_prix</string>
+	<string>TagUp</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>TagUp nécessite l'accès à la caméra pour scanner les codes-barres des articles en magasin (FLO/Kiabi).</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>L'accès à la galerie est nécessaire pour importer des logos ou des justificatifs de stock.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>L'accès au micro est requis pour les commandes vocales de recherche (si applicable).</string>
 </dict>
 </plist>

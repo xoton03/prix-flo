@@ -3,12 +3,17 @@ import 'package:csv/csv.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+// ──────────────────────────────────────────────────────────────
+// Modèle Article
+// ──────────────────────────────────────────────────────────────
 class Article {
   final String codeBarres;
   final String reference;
   final double prix;
   final double remise;
   final double prixSolde;
+  /// Identifiant du magasin propriétaire de cet article ('flo', 'kiabi', …)
+  final String storeId;
 
   Article({
     required this.codeBarres,
@@ -16,35 +21,40 @@ class Article {
     required this.prix,
     required this.remise,
     required this.prixSolde,
+    required this.storeId,
   });
 
   factory Article.fromMap(Map<String, dynamic> map) {
     return Article(
       codeBarres: map['code_barres']?.toString() ?? '',
-      reference: map['reference']?.toString() ?? '',
-      prix: double.tryParse(map['prix'].toString()) ?? 0.0,
-      remise: double.tryParse(map['remise'].toString()) ?? 0.0,
-      prixSolde: double.tryParse(map['prix_solde'].toString()) ?? 0.0,
+      reference:  map['reference']?.toString()  ?? '',
+      prix:       double.tryParse(map['prix'].toString())      ?? 0.0,
+      remise:     double.tryParse(map['remise'].toString())    ?? 0.0,
+      prixSolde:  double.tryParse(map['prix_solde'].toString()) ?? 0.0,
+      storeId:    map['store_id']?.toString() ?? '',
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
       'code_barres': codeBarres,
-      'reference': reference,
-      'prix': prix,
-      'remise': remise,
-      'prix_solde': prixSolde,
+      'reference':   reference,
+      'prix':        prix,
+      'remise':      remise,
+      'prix_solde':  prixSolde,
+      'store_id':    storeId,
     };
   }
 }
 
+// ──────────────────────────────────────────────────────────────
+// DatabaseHelper – Singleton
+// ──────────────────────────────────────────────────────────────
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   static Database? _database;
 
   factory DatabaseHelper() => _instance;
-
   DatabaseHelper._internal();
 
   Future<Database> get database async {
@@ -54,122 +64,165 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'articles_v2.db');
+    final String path = join(await getDatabasesPath(), 'articles_v3.db');
     return await openDatabase(
       path,
-      version: 1,
-      onCreate: _onCreate,
+      // Version 2 : ajout de la colonne store_id + clé primaire composite
+      version: 2,
+      onCreate:  _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
+  // ── Création initiale (v2) ─────────────────────────────────
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE articles(
-        code_barres TEXT PRIMARY KEY,
-        reference TEXT,
-        prix REAL,
-        remise REAL,
-        prix_solde REAL
+        code_barres TEXT NOT NULL,
+        store_id    TEXT NOT NULL,
+        reference   TEXT,
+        prix        REAL,
+        remise      REAL,
+        prix_solde  REAL,
+        PRIMARY KEY (code_barres, store_id)
       )
     ''');
   }
 
-  Future<void> clearAndInsertAll(List<Map<String, dynamic>> rows) async {
+  // ── Migration v1 → v2 ──────────────────────────────────────
+  // (utilisée si quelqu'un avait déjà articles_v2.db)
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Ajoute la colonne avec une valeur par défaut pour les anciennes lignes
+      await db.execute(
+          "ALTER TABLE articles ADD COLUMN store_id TEXT NOT NULL DEFAULT 'flo'");
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // CRUD
+  // ──────────────────────────────────────────────────────────
+
+  /// Supprime UNIQUEMENT les articles du magasin [storeId], puis insère
+  /// les nouvelles lignes. Les autres magasins ne sont pas touchés.
+  Future<void> clearAndInsertAll(
+    List<Map<String, dynamic>> rows,
+    String storeId,
+  ) async {
     final db = await database;
-    
+
     await db.transaction((txn) async {
-      // Vider la table avant la nouvelle insertion
-      await txn.delete('articles');
-      
-      Batch batch = txn.batch();
-      
-      for (var row in rows) {
-        // On inclut la clé avec le tiret en priorité absolue
-        String code = (row['code-barres_article'] ?? row['code_barres_article'] ?? '').toString().trim();
-        String reference = (row['ref'] ?? row['reference'] ?? '').toString().trim();
+      // Suppression ciblée : seulement ce magasin
+      await txn.delete(
+        'articles',
+        where: 'store_id = ?',
+        whereArgs: [storeId],
+      );
 
-        if (code.isEmpty) {
-          continue; 
-        }
+      final Batch batch = txn.batch();
 
-        String rawPrice = (row['prix_'] ?? '0').toString().replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '.');
-        double prix = double.tryParse(rawPrice) ?? 0.0;
+      for (final row in rows) {
+        final String code = (row['code-barres_article'] ??
+                row['code_barres_article'] ??
+                '')
+            .toString()
+            .trim();
+        final String reference =
+            (row['ref'] ?? row['reference'] ?? '').toString().trim();
 
-        String rawRemise = (row['remise'] ?? '0').toString().replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '.');
-        double remise = double.tryParse(rawRemise) ?? 0.0;
+        if (code.isEmpty) continue;
 
-        String rawSolde = (row['prix_solde'] ?? '0').toString().replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '.');
-        double prixSolde = double.tryParse(rawSolde) ?? 0.0;
+        final String rawPrice = (row['prix_'] ?? '0')
+            .toString()
+            .replaceAll(RegExp(r'[^0-9.,]'), '')
+            .replaceAll(',', '.');
+        final double prix = double.tryParse(rawPrice) ?? 0.0;
+
+        final String rawRemise = (row['remise'] ?? '0')
+            .toString()
+            .replaceAll(RegExp(r'[^0-9.,]'), '')
+            .replaceAll(',', '.');
+        final double remise = double.tryParse(rawRemise) ?? 0.0;
+
+        final String rawSolde = (row['prix_solde'] ?? '0')
+            .toString()
+            .replaceAll(RegExp(r'[^0-9.,]'), '')
+            .replaceAll(',', '.');
+        final double prixSolde = double.tryParse(rawSolde) ?? 0.0;
 
         batch.insert(
           'articles',
           {
             'code_barres': code,
-            'reference': reference,
-            'prix': prix,
-            'remise': remise,
-            'prix_solde': prixSolde,
+            'store_id':    storeId, // ← cloisonnement
+            'reference':   reference,
+            'prix':        prix,
+            'remise':      remise,
+            'prix_solde':  prixSolde,
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
-      
+
       await batch.commit(noResult: true);
     });
   }
 
-  Future<List<Article>> getAllArticles() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('articles');
-    
-    return List.generate(maps.length, (i) {
-      return Article.fromMap(maps[i]);
-    });
-  }
-
-  Future<Article?> getArticleByCode(String codeBarres) async {
+  /// Retourne tous les articles d'un magasin donné.
+  Future<List<Article>> getAllArticles(String storeId) async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'articles',
-      where: 'code_barres = ?',
-      whereArgs: [codeBarres],
+      where: 'store_id = ?',
+      whereArgs: [storeId],
     );
-
-    if (maps.isNotEmpty) {
-      return Article.fromMap(maps.first);
-    }
-    return null;
+    return maps.map(Article.fromMap).toList();
   }
 
-  Future<int> importLocalCSV(String filePath) async {
+  /// Retourne un article par code-barres ET magasin.
+  Future<Article?> getArticleByCode(
+      String codeBarres, String storeId) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'articles',
+      where: 'code_barres = ? AND store_id = ?',
+      whereArgs: [codeBarres, storeId],
+    );
+    return maps.isNotEmpty ? Article.fromMap(maps.first) : null;
+  }
+
+  /// Importe un fichier CSV local et attache chaque ligne au [storeId].
+  Future<int> importLocalCSV(String filePath, String storeId) async {
     final String csvString = await File(filePath).readAsString();
-    
-    // Détection basique du délimiteur
-    String delimiter = csvString.contains(';') ? ';' : ',';
-    
+
+    // Détection automatique du délimiteur
+    final String delimiter = csvString.contains(';') ? ';' : ',';
+
     final List<List<dynamic>> csvTable = CsvToListConverter().convert(
-      csvString, 
+      csvString,
       fieldDelimiter: delimiter,
     );
-    
+
     if (csvTable.isEmpty) return 0;
-    
-    final List<String> headers = csvTable.first.map((e) => e.toString().toLowerCase().trim()).toList();
-    List<Map<String, dynamic>> rows = [];
-    
+
+    final List<String> headers =
+        csvTable.first.map((e) => e.toString().toLowerCase().trim()).toList();
+
+    final List<Map<String, dynamic>> rows = [];
+
     for (int i = 1; i < csvTable.length; i++) {
       final row = csvTable[i];
-      if (row.length < headers.length) continue; 
-      
-      Map<String, dynamic> rowMap = {};
+      if (row.length < headers.length) continue;
+
+      final Map<String, dynamic> rowMap = {};
       for (int j = 0; j < headers.length; j++) {
         rowMap[headers[j]] = row[j];
       }
       rows.add(rowMap);
     }
-    
-    // Utilise EXACTEMENT la même logique claire et sécurisée d'insertion
-    await clearAndInsertAll(rows);
+
+    // Insertion avec le bon storeId
+    await clearAndInsertAll(rows, storeId);
     return rows.length;
   }
 }

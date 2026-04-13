@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "565433370234",
+    "project_id": "posfirebase-96abd",
+    "storage_bucket": "posfirebase-96abd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:565433370234:android:025c1b5a21d4a9077f1dc3",
+        "android_client_info": {
+          "package_name": "com.example.flo_prix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2ifd7UcXG7oQpjbJ1Z2--eebOdh4P3WA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
